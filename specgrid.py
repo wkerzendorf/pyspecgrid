@@ -52,7 +52,7 @@ def getSpecs(gridName, fnames, config, **kwargs):
         
         
         if kwargs.has_key('normrange'):
-            normFac = np.mean(spec[normSlice])
+            normFac = np.mean(spec[normSlice].flux)
             spec /= normFac
             
             
@@ -91,9 +91,9 @@ def getGridDBConnection(gridName):
 
 #
 class minuitFunction(object):
-    def __init__(self, specGrid, sampleFlux):
+    def __init__(self, specGrid, sampleSpec):
         self.specGrid = specGrid
-        self.sampleFlux = sampleFlux
+        self.sampleSpec = sampleSpec
     class func_code:
         co_varnames = []
         co_argcount = 0
@@ -105,8 +105,8 @@ class minuitFunction(object):
     def __call__(self, *args):
         if len(args) != self.func_code.co_argcount:
             raise TypeError, "wrong number of arguments"
-        gridFlux = self.specGrid(*args)
-        chi2 = np.mean((self.sampleFlux - gridFlux)**2)
+        gridSpec = self.specGrid.getSpec(*args)
+        chi2 = np.mean((self.sampleSpec.flux - gridSpec.interpolate(self.sampleSpec.wave).flux)**2)
         return chi2
                 
         
@@ -177,12 +177,13 @@ class specGrid(object):
     
     def fitChiSq(self, sampleSpec):
         newSampleSpec = sampleSpec.interpolate(self.wave)
-        chiSq = np.mean((self.values-newSampleSpec.flux)**2, axis=1)
+        minIDx = self.wave.searchsorted(sampleSpec.wave[0])
+        maxIDx = self.wave.searchsorted(sampleSpec.wave[-1])
+        chiSq = np.mean((self.values[:,minIDx:maxIDx]-newSampleSpec.flux[minIDx:maxIDx])**2, axis=1)
         return self.points[np.argmin(chiSq)]
     
     def getMinuit(self, sampleSpec):
-        newSampleSpec = sampleSpec.interpolate(self.wave)
-        f = minuitFunction(self, newSampleSpec.flux)
+        f = minuitFunction(self, sampleSpec)
         f.varnames(*self.params)
         return minuit.Minuit(f)
         
