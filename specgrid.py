@@ -1,4 +1,5 @@
 import pyspec
+from pyspec import oned
 import os
 from scipy import interpolate, ndimage
 import numpy as np
@@ -7,152 +8,76 @@ from glob import glob
 import pysynphot
 import pydib
 import ConfigParser
+import pdb
+import minuit
 
 from matplotlib.widgets import Slider
 specGridDir = '/Users/wkerzend/projects/grids'
 
-def getSimpleSpecs(gridName, fnames, config, **kwargs):
+def getSpecs(gridName, fnames, config, **kwargs):
 
     #reading config
     waveFName = config.get('wave', 'wave')
     specDType = config.get('structure', 'datatype')
     specSize = config.getint('structure', 'specsize')
+    specsize = config.getint('wave', 'islog')
+    R = config.getfloat('params', 'r')
     
+    if kwargs.has_key('smoothres'):
+        if kwargs['smoothres']>R:
+            raise ValueError('requested resolution (R=%f) higher than'
+                             'models intrinsic resolution (R=%f)' % (kwargs['smoothres'], R))
     #Reading wave solution
     wave = np.fromfile(os.path.join(specGridDir, gridName, waveFName))
+    
     
     gridSize = len(fnames) * specSize / 1024**2
     print "Processing %.3f MB in to Memory." % gridSize
     
     specs = []
-    if kwargs.has_key('normRange'):
-        if kwargs.has_key('normMode'):
-            normMode = kwargs['normMode']
+    if kwargs.has_key('normrange'):
+        if kwargs.has_key('normmode'):
+            normMode = kwargs['normmode']
         else:
             normMode = 'simple'
         
         if normMode == 'simple':
-            normSlice = slice(*[wave.searchsorted(item) for item in kwargs['normRange']])
-            
-    for specFName in fnames:
-        spec = np.fromfile(os.path.join(specGridDir, gridName, 'data', specFName))
-        if kwargs.has_key('normRange'):
-            normFac = np.mean(spec[normSlice])
-            spec /= normFac
-        if kwargs.has_key('newWave'):
-            newWave = kwargs['newWave']
-            f = interpolate.interp1d(wave, spec)
-            spec = f(kwargs['newWave'])
-        if kwargs.has_key('smoothRes'):
-            if kwargs.has_key('newWave'):
-                deltaLambda = ((newWave.max()+newWave.min())/2.)/kwargs['smoothRes']
-            else:
-                deltaLambda = ((wave.max()+wave.min())/2.)/kwargs['smoothRes']
-            sigma = deltaLambda / 2.3548
-            spec = ndimage.gaussian_filter1d(spec, sigma)
-        specs.append(spec)
-    if kwargs.has_key('newWave'):
-        return newWave, np.array(specs)
-    else:
-        return wave, np.array(specs)
-        
-def getMunariSpecs(gridName, fnames, config, **kwargs):
-
-    #reading config
-    waveFName = config.get('wave', 'wave')
-    specDType = config.get('structure', 'datatype')
-    specSize = config.getint('structure', 'specsize')
-    
-    #Reading wave solution
-    wave = np.fromfile(os.path.join(specGridDir, gridName, waveFName))
-    
-    gridSize = len(fnames) * specSize / 1024**2
-    print "Processing %.3f MB in to Memory." % gridSize
-    
-    specs = []
-    if kwargs.has_key('normRange'):
-        if kwargs.has_key('normMode'):
-            normMode = kwargs['normMode']
+            normSlice = slice(*[wave.searchsorted(item) for item in kwargs['normrange']])
         else:
-            normMode = 'simple'
-        
-        if normMode == 'simple':
-            normSlice = slice(*[wave.searchsorted(item) for item in kwargs['normRange']])
+            raise NotImplementedError('Normalisation mode %s has not been implemented yet' % normMode)
             
     for specFName in fnames:
-        spec = np.fromfile(os.path.join(specGridDir, gridName, 'data', specFName))
-        if kwargs.has_key('normRange'):
-            normFac = np.mean(spec[normSlice])
-            spec /= normFac
-        if kwargs.has_key('newWave'):
-            newWave = kwargs['newWave']
-            f = interpolate.interp1d(wave, spec)
-            spec = f(kwargs['newWave'])
-        if kwargs.has_key('smoothRes'):
-            if kwargs.has_key('newWave'):
-                deltaLambda = ((newWave.max()+newWave.min())/2.)/kwargs['smoothRes']
-            else:
-                deltaLambda = ((wave.max()+wave.min())/2.)/kwargs['smoothRes']
-            sigma = deltaLambda / 2.3548
-            spec = ndimage.gaussian_filter1d(spec, sigma)
-        specs.append(spec)
-    if kwargs.has_key('newWave'):
-        return newWave, np.array(specs)
-    else:
-        return wave, np.array(specs)
-
-def getMarcsSpecs(gridName, fnames, config, **kwargs):
-
-    #reading config
-    waveFName = config.get('wave', 'wave')
-    specDType = config.get('structure', 'datatype')
-    specSize = config.getint('structure', 'specsize')
-    
-    #Reading wave solution
-    wave = np.fromfile(os.path.join(specGridDir, gridName, waveFName))
-    
-    gridSize = len(fnames) * specSize / 1024**2
-    print "Processing %.3f MB in to Memory." % gridSize
-    
-    specs = []
-    if kwargs.has_key('normRange'):
-        if kwargs.has_key('normMode'):
-            normMode = kwargs['normMode']
-        else:
-            normMode = 'simple'
+        flux = np.fromfile(os.path.join(specGridDir, gridName, 'data', specFName))
+        spec = oned.onedspec(wave, flux, mode='waveflux')
         
-        if normMode == 'simple':
-            normSlice = slice(*[wave.searchsorted(item) for item in kwargs['normRange']])
-            
-    for specFName in fnames:
-        spec = np.fromfile(os.path.join(specGridDir, gridName, 'data', specFName))
-        if kwargs.has_key('normRange'):
+        
+        if kwargs.has_key('normrange'):
             normFac = np.mean(spec[normSlice])
             spec /= normFac
-        if kwargs.has_key('newWave'):
-            newWave = kwargs['newWave']
-            f = interpolate.interp1d(wave, spec)
-            spec = f(kwargs['newWave'])
-        if kwargs.has_key('smoothRes'):
-            if kwargs.has_key('newWave'):
-                deltaLambda = ((newWave.max()+newWave.min())/2.)/kwargs['smoothRes']
+            
+            
+        if kwargs.has_key('smoothres') or kwargs.has_key('smoothrot'):
+            if kwargs.has_key('wave'):
+                tmpSpec = spec[float(kwargs['wave'].min()):float(kwargs['wave'].max())]
+                logDelta, logSpec = tmpSpec.interpolate_log()
             else:
-                deltaLambda = ((wave.max()+wave.min())/2.)/kwargs['smoothRes']
-            sigma = deltaLambda / 2.3548
-            spec = ndimage.gaussian_filter1d(spec, sigma)
-        specs.append(spec)
-    if kwargs.has_key('newWave'):
-        return newWave, np.array(specs)
+                logDelta, logSpec = spec.interpolate_log()
+            if kwargs.has_key('smoothres'):
+                logSpec = logSpec.convolve_profile(kwargs['smoothres'], smallDelta=logDelta)
+            if kwargs.has_key('smoothrot'):
+                logSpec = logSpec.convolve_rotation(kwargs['smoothrot'], smallDelta=logDelta)
+            spec = logSpec
+        
+        if kwargs.has_key('wave'):
+            spec = spec.interpolate(kwargs['wave'])
+            
+        specs.append(spec.flux)
+    if kwargs.has_key('wave'):
+        return kwargs['wave'], np.array(specs)
     else:
         return wave, np.array(specs)
-
-
-
-specGridFunc = {
-        'munari': getMunariSpecs,
-        'marcs' : getMarcsSpecs,
-        'specgrid1' : getSimpleSpecs
-}
+        
+    
 
 def getGridNames():
     return [os.path.basename(item.strip('.db3')) for item in glob(os.path.join(specGridDir, '*.db3'))]
@@ -165,7 +90,24 @@ def getGridDBConnection(gridName):
         return sqlite3.connect(os.path.join(specGridDir, gridName, 'index.db3'), detect_types=sqlite3.PARSE_DECLTYPES)
 
 #
+class minuitFunction(object):
+    def __init__(self, specGrid, sampleFlux):
+        self.specGrid = specGrid
+        self.sampleFlux = sampleFlux
+    class func_code:
+        co_varnames = []
+        co_argcount = 0
 
+    def varnames(self, *args):
+        self.func_code.co_varnames = args
+        self.func_code.co_argcount = len(args)
+
+    def __call__(self, *args):
+        if len(args) != self.func_code.co_argcount:
+            raise TypeError, "wrong number of arguments"
+        gridFlux = self.specGrid(*args)
+        chi2 = np.mean((self.sampleFlux - gridFlux)**2)
+        return chi2
                 
         
 class specGrid(object):
@@ -216,14 +158,35 @@ class specGrid(object):
         DBData = conn.execute(sqlStmt).fetchall()
         fnames = zip(*DBData)[-1]
         self.points = np.array(zip(*zip(*DBData)[:-1]))
+        self.limits = [(np.min(item), np.max(item)) for item in self.points.transpose()] 
         print "Reading Values"
-        self.wave, self.values = specGridFunc[gridName](gridName, fnames, config)
+        #if gridName in specGridFunc:
+        #    specGridFunction = specGridFunc[gridName]
+        #else:
+        #    specGridFunction = specGridFunc['default']
+        specGridFunction = getSpecs
+        self.wave, self.values = specGridFunction(gridName, fnames, config, **kwargs)
         self.interpGrid = interpolate.LinearNDInterpolator(self.points, self.values, fill_value=-1.)
         return None
     
     
     def __call__(self, *args):
         return self.interpGrid(args)
+    def getSpec(self, *args):
+        return oned.onedspec(self.wave, self.interpGrid(args), type='waveflux')
+    
+    def fitChiSq(self, sampleSpec):
+        newSampleSpec = sampleSpec.interpolate(self.wave)
+        chiSq = np.mean((self.values-newSampleSpec.flux)**2, axis=1)
+        return self.points[np.argmin(chiSq)]
+    
+    def getMinuit(self, sampleSpec):
+        newSampleSpec = sampleSpec.interpolate(self.wave)
+        f = minuitFunction(self, newSampleSpec.flux)
+        f.varnames(*self.params)
+        return minuit.Minuit(f)
+        
+        
         
 class reddenGrid(object):
     def __init__(self, ebvRange, wave, enableDIB=False, enableFlux=True, extinctionLaw = 'gal3'):
