@@ -2,6 +2,7 @@ from PyQt4 import QtGui, QtCore
 import pylab
 import copy
 import minuit
+import numpy as np
 
 class converter(object):
     def __init__(self, limit, sliderResolution=1000):

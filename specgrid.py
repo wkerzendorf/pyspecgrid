@@ -6,13 +6,14 @@ import numpy as np
 import sqlite3
 from glob import glob
 import pysynphot
-import pydib
+#import pydib
 import ConfigParser
 import pdb
 import minuit
 
 from matplotlib.widgets import Slider
-specGridDir = '/Users/wkerzend/projects/grids'
+specGridDir = os.path.expanduser('~/.specgrids')
+#specGridDir = '/Users/wkerzend/projects/grids'
 
 def getSpecs(gridName, fnames, config, **kwargs):
 
