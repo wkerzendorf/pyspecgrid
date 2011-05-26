@@ -108,6 +108,7 @@ class FitterGUI(QtGui.QWidget):
         layout.addWidget(self.buttonMigrad, i+1, 3)
         self.setLayout(layout)
         self.show()
+        self.figure.show()
     def _sliderChanged(self, value):
 
         for i, (slider, textBox, converter) in enumerate(zip(self.sliders, self.textBoxes, self.converters)):
