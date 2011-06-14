@@ -50,6 +50,7 @@ class FitterGUI(QtGui.QWidget):
         self.figure = pylab.figure(1)
         self.figure.clf()
         self.sampleSpec = None
+
         self.fitChiSq = None
         self.ax = self.figure.add_subplot(111)
         spec = self.specGrid.getSpec(*(item[0] for item in self.specGrid.limits))
@@ -84,6 +85,7 @@ class FitterGUI(QtGui.QWidget):
             layout.addWidget(qlabel, i, 1, 1, 1)
             layout.addWidget(slider, i, 2, 1, 10)
             layout.addWidget(tbox, i, 12, 1, 1)
+            
         self.buttonChiSq = QtGui.QPushButton('Chi Square')
         self.buttonChiSq.setDisabled(True)
         self.connect(self.buttonChiSq,
@@ -102,10 +104,11 @@ class FitterGUI(QtGui.QWidget):
         self.connect(self.buttonMigrad,
             QtCore.SIGNAL("clicked()"),
             self._fitMigrad)
-        
+        self.fvalLabel = QtGui.QLabel('fval = None')
         layout.addWidget(self.buttonChiSq, i+1, 1)
         layout.addWidget(self.buttonSimplex, i+1, 2)
         layout.addWidget(self.buttonMigrad, i+1, 3)
+        layout.addWidget(self.fvalLabel, i+1, 4)
         self.setLayout(layout)
         self.show()
         self.figure.show()
@@ -114,6 +117,8 @@ class FitterGUI(QtGui.QWidget):
         for i, (slider, textBox, converter) in enumerate(zip(self.sliders, self.textBoxes, self.converters)):
             self.curValue[i] = converter.convertFromSlider(slider.value())
             textBox.setText(str(self.curValue[i]))
+        if self.sampleSpec != None:
+            self.fvalLabel.setText('fval=%s' % self.fminuit.fcn(*self.curValue))
         self._updateSpecPlot()
         
     def _updateSpecPlot(self):
@@ -137,12 +142,16 @@ class FitterGUI(QtGui.QWidget):
             
             self.curValue[i] = value
             slider.setValue(converter.convertToSlider(value))
+        if self.sampleSpec != None:
+            self.fvalLabel.setText('fval=%s' % self.fminuit.fcn(*self.curValue))
         self._updateSpecPlot()
     
     def _updateFromCurValue(self):
         for slider, textbox, converter, value in zip(self.sliders, self.textBoxes, self.converters, self.curValue):
             slider.setValue(converter.convertToSlider(value))
             textbox.setText(str(value))
+        if self.sampleSpec != None:
+            self.fvalLabel.setText('fval=%s' % self.fminuit.fcn(*self.curValue))
         self._updateSpecPlot()
         
     def _fitChiSq(self):

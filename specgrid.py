@@ -1,7 +1,8 @@
 import pyspec
 from pyspec import oned
 import os
-from scipy import interpolate, ndimage
+from scipy import interpolate, ndimage, optimize
+from scipy.interpolate import LinearNDInterpolator
 import numpy as np
 import sqlite3
 from glob import glob
@@ -12,6 +13,8 @@ import pdb
 import minuit
 import time
 from matplotlib.widgets import Slider
+from iwfinterpolate import Invdisttree
+
 defaultSpecGridDir = os.path.expanduser('~/.specgrids')
 
 
@@ -59,8 +62,7 @@ def getSpecs(specDataDir, fnames, config, **kwargs):
         if i%100 == 0:
             print "@%d took %.2f s" % (i, time.time() - startTime)
             startTime = time.time()
-        if kwargs.has_key('wave'):
-            spec = spec.interpolate(kwargs['wave'])
+        
             
         if kwargs.has_key('normrange'):
             normFac = np.mean(spec[normSlice].flux)
@@ -78,7 +80,9 @@ def getSpecs(specDataDir, fnames, config, **kwargs):
             if kwargs.has_key('smoothrot'):
                 logSpec = logSpec.convolve_rotation(kwargs['smoothrot'], smallDelta=logDelta)
             spec = logSpec
-        
+            
+        if kwargs.has_key('wave'):
+            spec = spec.interpolate(kwargs['wave'])
 
             
         specs.append(spec.flux)
@@ -120,6 +124,7 @@ class minuitFunction2(object):
             raise TypeError, "wrong number of arguments"
         
         sampleSpec = self.sampleSpec
+        
         
         if 'vrot' in self.func_code.co_varnames:
             vrot = args[-1]
@@ -167,16 +172,21 @@ class minuitFunction(object):
         self.func_code.co_argcount = len(args)
 
     def __call__(self, *args):
+        if len(args) == 1:
+            print "warning attempting to unwrap args"
+            args = args[0]
         if len(args) != self.func_code.co_argcount:
             raise TypeError, "wrong number of arguments"
         
         sampleSpec = self.sampleSpec
+        priors = self.priors
         
         if 'vrot' in self.func_code.co_varnames:
             vrot = args[-1]
             vrot = np.max((2., np.abs(vrot)))
             gridSpec = self.specGrid.getSpec(*args[:-1])
-            gridSpec = gridSpec.convolve_rotation(abs(vrot))
+            if vrot != 0.:
+                gridSpec = gridSpec.convolve_rotation(abs(vrot))
             gridSpec = gridSpec.interpolate(sampleSpec.wave)
         else:
             #pdb.set_trace()
@@ -201,21 +211,21 @@ class minuitFunction(object):
         chiSq = ((gridSpec.flux[dqMask]-sampleSpec.flux[dqMask])/var[dqMask])**2
         nu = gridSpec.wave.shape[0] - self.func_code.co_argcount - 1
         
-#        chi_prior = 0.
-#        if priors != None:
-#            for i, prior in enumerate(priors):
-#                if prior == None: continue
-#                chi_prior += ((args[i] - prior[0]) /  prior[1])**2
-#                nu += 1
+        chi_prior = 0.
+        if priors != None:
+            for i, prior in enumerate(priors):
+                if prior == None: continue
+                chi_prior += ((args[i] - prior[0]) /  prior[1])**2
+                nu += 1
                 
         
-        redChiSq = chiSq / nu
+        redChiSq = (np.sum(chiSq) + chi_prior) / nu
         
         return redChiSq
 
         
 class specGrid(object):
-    def __init__(self, gridName, params, paramLimits, mode='spec', specGridDir=None, **kwargs):
+    def __init__(self, gridName, params, paramLimits, mode='spec', specGridDir=None, interpolator=Invdisttree, **kwargs):
         """
             Function specgrid
             
@@ -273,7 +283,8 @@ class specGrid(object):
         #    specGridFunction = specGridFunc['default']
         specGridFunction = getSpecs
         self.wave, self.values = specGridFunction(os.path.join(specGridDir, gridName), fnames, config, **kwargs)
-        self.interpGrid = interpolate.LinearNDInterpolator(self.points, self.values, fill_value=-1.)
+        self.interpGrid = interpolator(self.points, self.values)
+        
         return None
     
     
@@ -288,11 +299,8 @@ class specGrid(object):
             newSampleSpec = sampleSpec
             grid = self.values
         else:
-            print "error in function"
-            newSampleSpec = sampleSpec.interpolate(self.wave)            
-            minIDx = self.wave.searchsorted(sampleSpec.wave[0])
-            maxIDx = self.wave.searchsorted(sampleSpec.wave[-1])
-            grid = self.values[:,minIDx:maxIDx]
+            newSampleSpec = sampleSpec.interpolate(self.wave)          
+            grid = self.values
 
         
         if newSampleSpec.var != None:
@@ -325,22 +333,38 @@ class specGrid(object):
             return np.min(redChiSq), self.points[np.argmin(redChiSq)]
         else:
             return self.points[np.argmin(redChiSq)]
+            
+    def fitBFGS(self, sampleSpec, initValues=None, vrot=None, priors=None):
+        
+        f = minuitFunction(self, sampleSpec, priors=priors)
+        
+        if vrot != None:
+            varnames = list(self.params) + ['vrot']
+            f.varnames(*varnames)
+            return optimize.fmin_bfgs(f, initValues)
+        else:
+            f.varnames(*self.params)
+            return optimize.fmin_bfgs(f, initValues)
     
     def getMinuitFunction(self, sampleSpec):
         pass
-    def getMinuit(self, sampleSpec, vrot=None, priors=None):
+    def getMinuit(self, sampleSpec, init=None, vrot=None, priors=None):
         
-        f = minuitFunction(self, sampleSpec)
+        f = minuitFunction(self, sampleSpec, priors=priors)
         
         if vrot != None:
             varnames = list(self.params) + ['vrot']
             f.varnames(*varnames)
             fmin = minuit.Minuit(f)
             fmin.values['vrot']=vrot
-            return fmin
         else:
             f.varnames(*self.params)
-            return minuit.Minuit(f)
+            fmin = minuit.Minuit(f)
+        
+        if init!=None:
+            fmin.values.update(dict(zip(self.params, init)))
+        
+        return fmin
     
         
         
