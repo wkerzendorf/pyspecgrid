@@ -60,6 +60,7 @@ def getSpecs(specDataDir, fnames, config, **kwargs):
         else:
             raise NotImplementedError('Normalisation mode %s has not been implemented yet' % normMode)
     startTime = time.time()
+    
     for i, specFName in enumerate(fnames):
         flux = np.fromfile(os.path.join(specDataDir, 'data', specFName))
         spec = oned.onedspec(wave, flux, mode='waveflux')
@@ -69,8 +70,10 @@ def getSpecs(specDataDir, fnames, config, **kwargs):
         
             
         if kwargs.has_key('normrange'):
-            normFac = np.mean(spec[normSlice].flux)
-            spec /= normFac
+            normrange = kwargs['normrange']
+            normFac = np.mean(spec[slice(*normrange)].flux)
+            spec.flux /= normFac
+            
             
             
         if kwargs.has_key('smoothres') or kwargs.has_key('smoothrot'):
