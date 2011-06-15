@@ -251,14 +251,12 @@ class specGrid(object):
         #get spectralGrid
         # modelGrid
         # params specified ((param1,(lowerLimit, upperLimit)), (param2,
-
+        self.params = params
         if 'ebv' in params:
             if params.index('ebv') != len(params) - 1:
                 raise IndexError('ebv param must be at the end')
             if len(paramLimits[-1]) != 3:
                 raise ValueError('paramLimits for ebv must consist of start end and steps')
-            
-            self.params = params
             params = self.params[:-1]
         
         #SQL Statement assembly
