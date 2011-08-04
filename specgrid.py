@@ -14,6 +14,9 @@ import minuit
 import time
 from matplotlib.widgets import Slider
 from iwfinterpolate import Invdisttree
+
+import itertools
+
 try:
     import pydib
 except ImportError:
@@ -49,16 +52,7 @@ def getSpecs(specDataDir, fnames, config, **kwargs):
     print "Processing %.3f MB in to Memory." % gridSize
     
     specs = []
-    if kwargs.has_key('normrange'):
-        if kwargs.has_key('normmode'):
-            normMode = kwargs['normmode']
-        else:
-            normMode = 'simple'
-        
-        if normMode == 'simple':
-            normSlice = slice(*[wave.searchsorted(item) for item in kwargs['normrange']])
-        else:
-            raise NotImplementedError('Normalisation mode %s has not been implemented yet' % normMode)
+
     startTime = time.time()
     
     for i, specFName in enumerate(fnames):
@@ -90,6 +84,8 @@ def getSpecs(specDataDir, fnames, config, **kwargs):
             
         if kwargs.has_key('wave'):
             spec = spec.interpolate(kwargs['wave'])
+        else:
+            spec = spec.interpolate(wave)
 
             
         specs.append(spec.flux)
@@ -159,7 +155,7 @@ class minuitFunction2(object):
         
             
         chiSq = ((gridSpec.flux[dqMask]-sampleSpec.flux[dqMask])/var[dqMask])**2
-        nu = gridSpec.wave.shape[0] - self.func_code.co_argcount - 1
+        #nu = gridSpec.wave.shape[0] - self.func_code.co_argcount - 1
         redChiSq = np.sum(chiSq) / nu
         
         return redChiSq
@@ -180,7 +176,7 @@ class minuitFunction(object):
 
     def __call__(self, *args):
         if len(args) == 1:
-            print "warning attempting to unwrap args"
+            #print "warning attempting to unwrap args"
             args = args[0]
         if len(args) != self.func_code.co_argcount:
             raise TypeError, "wrong number of arguments"
@@ -216,7 +212,7 @@ class minuitFunction(object):
         
             
         chiSq = ((gridSpec.flux[dqMask]-sampleSpec.flux[dqMask])/var[dqMask])**2
-        nu = gridSpec.wave.shape[0] - self.func_code.co_argcount - 1
+        #nu = gridSpec.wave.shape[0] - self.func_code.co_argcount - 1
         
         chi_prior = 0.
         if priors != None:
@@ -226,9 +222,9 @@ class minuitFunction(object):
                 nu += 1
                 
         
-        redChiSq = (np.sum(chiSq) + chi_prior) / nu
+        finalChiSq = (np.sum(chiSq) + chi_prior)
         
-        return redChiSq
+        return finalChiSq
 
         
 class specGrid(object):
@@ -299,10 +295,23 @@ class specGrid(object):
 
         specGridFunction = getSpecs
         self.wave, self.values = specGridFunction(os.path.join(specGridDir, gridName), fnames, config, **kwargs)
+
         self.interpGrid = interpolator(self.points, self.values)
-        
+
+        if interpolator == Invdisttree:
+            self.interpGrid.p = 3
+            self.interpGrid.nnear = 8
+            
         if 'ebv' in self.params:
-            self.redGrid = reddenGrid(np.linspace(*paramLimits[-1]), self.wave, enableFlux=True, enableDIB=True)            
+            
+            if kwargs.has_key('normrange'):
+                normRange = kwargs['normrange']
+            else:
+                normRange = None
+            self.redGrid = reddenGrid(np.linspace(*paramLimits[-1]), self.wave, enableFlux=True, enableDIB=True, normRange=normRange)
+            self.limits += [(self.paramLimits[-1][0], self.paramLimits[-1][1])]
+        else:
+            self.redGrid = None
             
             
             
@@ -317,10 +326,10 @@ class specGrid(object):
         else:    
             return self.interpGrid(args)
     def getSpec(self, *args):
-        return oned.onedspec(self.wave, self(args), mode='waveflux')
+        return oned.onedspec(self.wave, self(*args), mode='waveflux')
     
     def fitChiSq(self, sampleSpec, returnChiSq=False, priors = None):
-
+        
         if np.all(sampleSpec.wave == self.wave):
             newSampleSpec = sampleSpec
             grid = self.values
@@ -339,26 +348,43 @@ class specGrid(object):
         else:
             dqMask = np.ones(grid.shape[1]).astype(bool)
         
-            
-        chiSq = np.sum(((grid[:,dqMask]-newSampleSpec.flux[dqMask])/var[dqMask])**2, axis=1)
-        nu = (np.ones(grid.shape[0])*grid.shape[1]) - len(self.params) - 1
         chi_prior = np.zeros(self.points.shape[0])
         if priors != None:
-            for i, prior in enumerate(priors):
-                if prior == None: continue
-                chi_prior += ((self.points[:,i] - prior[0]) /  prior[1])**2
-                nu += 1
-                
-        
-        redChiSq = (chiSq + chi_prior) / nu
+                    for i, prior in enumerate(priors):
+                        if prior == None: continue
+                        chi_prior += ((self.points[:,i] - prior[0]) /  prior[1])**2
+                        nu += 1
         
         
+        
+        if self.redGrid != None:
+            
+            points = []
+            chiSq = []
+            for ebv, extinctCurve in zip(self.redGrid.points, self.redGrid.values):
+                points.append(np.hstack((self.points, np.ones((self.points.shape[0], 1))*ebv)))
+                chiSq.append(np.sum(((grid[:,dqMask]*extinctCurve[dqMask]-newSampleSpec.flux[dqMask])/var[dqMask])**2, axis=1))
+            points = np.array(list(itertools.chain(*points)))
+            chiSq = np.array(list(itertools.chain(*chiSq)))
+            chiMin = np.min(chiSq)
+            bestParam = points[np.argmin(chiSq)]
+                    
+        
+        
+        if self.redGrid == None:
+            chiSq = np.sum(((grid[:,dqMask]-newSampleSpec.flux[dqMask])/var[dqMask])**2, axis=1)
+            
+            finalChiSq =  chiSq + chi_prior
+            chiMin = np.min(finalChiSq)
+            bestParam = self.points[np.argmin(finalChiSq)]
+        
+        nu = (np.ones(grid.shape[0]) * np.sum(dqMask)) - len(self.params) - 1
             
 
         if returnChiSq:
-            return np.min(redChiSq), self.points[np.argmin(redChiSq)]
+            return chiMin, bestParam
         else:
-            return self.points[np.argmin(redChiSq)]
+            return bestParam
             
     def fitBFGS(self, sampleSpec, initValues=None, vrot=None, priors=None):
         
@@ -371,6 +397,19 @@ class specGrid(object):
         else:
             f.varnames(*self.params)
             return optimize.fmin_bfgs(f, initValues)
+            
+            
+    def fitAnneal(self, sampleSpec, initValues=None, vrot=None, priors=None):
+        
+        f = minuitFunction(self, sampleSpec, priors=priors)
+        
+        if vrot != None:
+            varnames = list(self.params) + ['vrot']
+            f.varnames(*varnames)
+            return optimize.anneal(f, initValues)
+        else:
+            f.varnames(*self.params)
+            return optimize.fmin_bfgs(f, initValues) 
     
     def getMinuitFunction(self, sampleSpec):
         pass
@@ -395,7 +434,7 @@ class specGrid(object):
         
         
 class reddenGrid(object):
-    def __init__(self, ebvRange, wave, enableDIB=False, enableFlux=True, extinctionLaw = 'gal3'):
+    def __init__(self, ebvRange, wave, enableDIB=False, enableFlux=True, extinctionLaw = 'gal3', normRange=None):
         self.points = np.array(ebvRange)
         values = []
         for ebv in ebvRange:
@@ -408,10 +447,12 @@ class reddenGrid(object):
             
             if enableDIB:
                 extinctFlux *= pydib.makeSpectrum(wave, ebv).flux
-            
+            if normRange != None:
+                extinctFluxSpec = oned.onedspec(wave, extinctFlux, mode='waveflux')
+                extinctFlux /= np.mean(extinctFluxSpec[slice(*normRange)].flux)
             values.append(extinctFlux)
         self.values = np.array(values)
-        self.interpGrid = interpolate.interp1d(self.points, self.values.transpose(), fill_value=1, bounds_error=False)
+        self.interpGrid = interpolate.interp1d(self.points, self.values.transpose(), fill_value=1, bounds_error=False, kind='cubic')
     
     def __call__(self, *args):
         return self.interpGrid(args)[:,0]

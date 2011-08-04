@@ -70,9 +70,13 @@ is exceedingly sensitive to distance and to h.
         self.stat = stat
         self.wn = 0
         self.wsum = None;
+        self.nnear = 6
+        self.p = 1
 
-    def __call__( self, q, nnear=6, eps=0, p=1, weights=None ):
+    def __call__( self, q, eps=0, weights=None ):
             # nnear nearest neighbours of each query point --
+        nnear = self.nnear
+        p = self.p
         q = np.asarray(q)
         qdim = q.ndim
         if qdim == 1:

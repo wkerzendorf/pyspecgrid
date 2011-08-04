@@ -20,7 +20,7 @@ class converter(object):
         return int((value-self.limit[0])*self.sliderResolution/self.delta)
         
     def valueUpdate(val):
-        spec = specGrid.interpGrid(tuple([slider.val for slider in sliders]))
+        spec = self.specGrid(*tuple([slider.val for slider in sliders]))
         specPlot.set_ydata(spec)
         if autoScale:
             plotAxis.relim()
@@ -122,7 +122,7 @@ class FitterGUI(QtGui.QWidget):
         self._updateSpecPlot()
         
     def _updateSpecPlot(self):
-        spec = self.specGrid.interpGrid(tuple(self.curValue))
+        spec = self.specGrid(*tuple(self.curValue))
         self.specPlot.set_ydata(spec)
         if self.autoScaleView:
             self.ax.relim()
